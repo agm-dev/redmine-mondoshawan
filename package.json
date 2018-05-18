@@ -1,0 +1,45 @@
+{
+  "name": "redmine-mondoshawan",
+  "version": "0.0.1",
+  "description": "Script that connects to redmine using its rest api and fills up your working day adding random time entries to your asigned issues",
+  "main": "index.js",
+  "scripts": {
+    "test": "ava",
+    "lint": "standard",
+    "format": "standard --fix",
+    "validate": "npm ls",
+    "start": "nodemon --exec \"npm run format && npm run test\"",
+    "prod": "node index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agm-dev/redmine-mondoshawan.git"
+  },
+  "keywords": [
+    "redmine",
+    "time_entries",
+    "mondoshawan",
+    "automation"
+  ],
+  "author": "Adrián Gonzalo",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/agm-dev/redmine-mondoshawan/issues"
+  },
+  "homepage": "https://github.com/agm-dev/redmine-mondoshawan#readme",
+  "pre-commit": [
+    "lint",
+    "validate",
+    "test"
+  ],
+  "devDependencies": {
+    "ava": "^0.25.0",
+    "nodemon": "^1.17.4",
+    "precommit-hook": "^3.0.0",
+    "standard": "^11.0.1"
+  },
+  "dependencies": {
+    "dotenv": "^5.0.1",
+    "node-redmine": "^0.2.1"
+  }
+}

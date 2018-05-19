@@ -1,103 +1,64 @@
-const Redmine = require('node-redmine') // docs at: https://github.com/zanran/node-redmine
-require('dotenv').config()
+const redmine = require('./src/redmine')
+const { workingState, totalTime, logLevel } = require('./src/config')
 
-const apiKey = process.env.API_KEY || null
-const apiUrl = process.env.API_URL || null
-const workingState = 20 // testing
-const totalTime = 1 // 1 day, 8 hours, we only want a number to be split
+const logDebug = logLevel === 'debug'
 
-if (!apiKey || !apiUrl) {
-  console.error('You need to provide API_KEY and API_URL as env variables')
-  process.exit(1)
-}
+console.log(`init process`)
+console.log(`get all issues assigned to this user`)
 
-const redmine = new Redmine(apiUrl, { apiKey })
-const targetIssues = []
-const addedTimes = []
-let ready = true
+redmine.getIssues({ assigned_to_id: 'me' })
+  .then(data => {
+    console.log(`get issues OK`)
+    if (logDebug) console.log(JSON.stringify(data))
+    console.log(`got ${data.issues.length} issues assigned to this user`)
+    if (data.issues.length !== data.total_count) console.error(`inconsistence beetween issues.length (${data.issues.length}) and issues.total_count (${data.issues.total_count})`)
 
-redmine.issues({ assigned_to_id: 'me' }, (err, data) => {
-  if (err) throw err
-  console.log(`${data.issues.length} should be equal to ${data.total_count}`)
-  // console.log(JSON.stringify(data))
-  const workingIssues = data.issues.filter(issue => issue.status.id === workingState)
-  if (!workingIssues.length) {
-    console.error(`Can't add times because you have no issues in a 'working on' state`)
-    process.exit(1)
-  }
-
-  // we need another api call here because only issue-by-id endpoint returns time spent in the issue
-  ready = false
-  for (let i = 0; i < workingIssues.length; i++) {
-    redmine.get_issue_by_id(workingIssues[i].id, {}, (err, data) => {
-      if (err) throw err
-      console.log(`get_issue_by_id ${workingIssues[i].id} response`)
-      // console.log(JSON.stringify(data))
-      targetIssues.push(data)
-      processTargetIssues(workingIssues.length)
-    })
-  }
-})
-
-const processTargetIssues = n => {
-  if (n === targetIssues.length) {
-    ready = true
-    console.log('we are ready!')
-  }
-  if (ready) {
-    // console.log(`TODO: split time between targetIssues (we have ${targetIssues.length})`)
-    addTimes(totalTime, targetIssues)
-  }
-}
-
-const processAddedTimes = n => {
-  if (n === addedTimes.length) {
-    ready = true
-    console.log('times are ready!')
-  }
-  if (ready) {
-    console.log(`all times has been added correctly, you are free to go!`)
-  }
-}
-
-const addTimes = (totalTime, issues) => {
-  /**
-   * issue.done_ratio: 50
-   * issue.estimated_hours: 1.5
-   * issue.total_estimated_hours: 1.5
-   * issue.spent_hours: 0.5
-   * issue.total_spent_hours: 0.5
-   */
-  const idealIssues = issues.filter(issue => issue.spent_hours < issue.estimated_hours)
-  const targets = idealIssues.length ? idealIssues : issues
-  const timePerIssue = totalTime / targets.length
-  ready = false
-  for (let i = 0; i < targets.length; i++) {
-    // console.log(`EEEEH: ${JSON.stringify(targets[i])}`)
-    const timeEntryData = {
-      time_entry: {
-        issue_id: targets[i].issue.id,
-        hours: timePerIssue,
-        comments: 'Time not important. Only life important'
-      }
+    const workingIssues = data.issues.filter(issue => issue.status.id === workingState)
+    if (!workingIssues.length) { // TODO: add here default issues
+      console.error(`Can't add times because you have no issues in a 'working on' state`)
+      process.exit(1)
     }
-    console.log(timeEntryData)
-    /*
-    redmine.create_time_entry(timeEntryData, (err, data) => {
-      if (err) throw err;
-      console.log(`added time entry with value ${timeEntryData})
-      addedTimes.push(targets[i])
-      processAddedTimes(targets.length)
-    })
-    */
-    addedTimes.push(targets[i]) // remove on uncoment
-    processAddedTimes(targets.length) // remove on uncoment
-  }
-}
+    console.log(`filtered issues, got ${workingIssues.length} issues with state 'working on'`)
 
-// TODO:
-/**
- * -add support for fixed default issues
- * -sort the code, style, split
- * -real test
- */
+    // we need another api call here because only issue-by-id endpoint returns time spent in the issue
+    const promises = workingIssues.reduce((result, issue) => [...result, redmine.getIssueById(issue.id, {})], []) // so we construct an array with promises
+    return Promise.all(promises) // then we launch them in parallel
+  })
+  .then(results => {
+    console.log(`got issue data by id from ${results.length} issues`)
+    results.map(data => {
+      console.log(`issue data from issue id: ${data.issue.id}`)
+      if (logDebug) console.log(JSON.stringify(data))
+    })
+
+    const idealIssues = results.filter(data => data.issue.spent_hours < data.issue.estimated_hours)
+    console.log(`${idealIssues.length} issues with spent_hours value lower than estimated_hours value`)
+
+    const targets = idealIssues.length ? idealIssues : results
+    const timePerIssue = totalTime / targets.length
+    const promises = targets.reduce((result, target) => {
+      const timeEntryData = {
+        time_entry: {
+          issue_id: target.issue.id,
+          hours: timePerIssue,
+          comments: 'Time not important. Only life important' // TODO: make this one configurable
+        }
+      }
+      console.log(`time entry to create: ${JSON.stringify(timeEntryData)}`)
+      return [...result, redmine.createTimeEntry(timeEntryData)]
+    }, [])
+    return Promise.all(promises)
+  })
+  .then(results => {
+    console.log(`created ${results.length} time entries`)
+    results.map(data => {
+      console.log(`created time entry data`)
+      if (logDebug) console.log(JSON.stringify(data))
+    })
+    console.log(`process finished`)
+  })
+  .catch(err => {
+    if (err) {
+      throw err
+    }
+  })
